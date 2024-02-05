@@ -1,0 +1,73 @@
+---
+title: "R Notebook"
+output: 
+  pdf_document: 
+    toc_depth: 5
+---
+
+```{r}
+# Data Ingestion
+wimbledon2023 <- readRDS("Wimbledon_2023_Round_Match_Set_Game.rds")
+finalMatch <- wimbledon2023$round7$match1
+finalMatch <- dplyr::bind_rows(dplyr::bind_rows(finalMatch$set1), 
+							   dplyr::bind_rows(finalMatch$set2), 
+							   dplyr::bind_rows(finalMatch$set3), 
+							   dplyr::bind_rows(finalMatch$set4), 
+							   dplyr::bind_rows(finalMatch$set5))
+finalMatch <- computeMomentumRating(finalMatch)
+```
+
+```{r}
+# Visualize momentum rating over time
+ggplot(finalMatch) + 
+	geom_line(aes(1:nrow(finalMatch), player1Momentum, color = "Carlos Alcaraz")) + 
+	geom_line(aes(1:nrow(finalMatch), player2Momentum, color = "Novak Djokovic")) + 
+	geom_text(aes(x = 19, y = 480, label = "Set 1")) +
+	geom_vline(xintercept = which(finalMatch$set_no == 2)[1]) +
+	geom_text(aes(x = 97, y = 480, label = "Set 2")) +
+	geom_vline(xintercept = which(finalMatch$set_no == 3)[1]) +
+	geom_text(aes(x = 175, y = 480, label = "Set 3")) + 
+	geom_vline(xintercept = which(finalMatch$set_no == 4)[1]) +
+	geom_text(aes(x = 245, y = 480, label = "Set 4")) +
+	geom_vline(xintercept = which(finalMatch$set_no == 5)[1]) +
+	geom_text(aes(x = 310, y = 480, label = "Set 5")) +
+	labs(title = "Player Momentum", 
+		 subtitle = "2023 Wimbledon Championship - Men's Singles - Final Match",
+		 x = "Point Number",
+		 y = "Momentum Rating",
+		 color = "Player") + 
+	theme_bw()
+ggsave("Figures/Final_Match_Player_Momentum.png", dpi = 300)
+```
+
+```{r}
+ggplot(finalMatch) + 
+	geom_line(aes(1:nrow(finalMatch), momentumDelta, color = momentumDelta)) + 
+	scale__brewer(palette = "RdPu") +
+	geom_text(aes(x = 19, y = 150, label = "Set 1")) +
+	geom_vline(xintercept = which(finalMatch$set_no == 2)[1]) +
+	geom_text(aes(x = 97, y = 150, label = "Set 2")) +
+	geom_vline(xintercept = which(finalMatch$set_no == 3)[1]) +
+	geom_text(aes(x = 175, y = 150, label = "Set 3")) + 
+	geom_vline(xintercept = which(finalMatch$set_no == 4)[1]) +
+	geom_text(aes(x = 245, y = 150, label = "Set 4")) +
+	geom_vline(xintercept = which(finalMatch$set_no == 5)[1]) +
+	geom_text(aes(x = 310, y = 150, label = "Set 5")) +
+	labs(title = "Player Momentum Change",
+		 subtitle = "2023 Wimbledon Championship - Men's Singles - Final Game",
+		 x = "Point Number",
+		 y = "Momentum Change",
+		 color = "Momentum Change")
+```
+
+```{r}
+finalMatchOdds <- 10^(finalMatch$momentumDelta / 400)
+finalMatchWinProbabilities <- finalMatchOdds / (finalMatchOdds + 1)
+
+ggplot() + 
+	geom_line(aes(1:length(finalMatchOdds), finalMatchWinProbabilities, color = "Alcaraz")) + 
+	geom_line(aes(1:334, 10^((finalMatch$player2Momentum - finalMatch$player1Momentum) / 400) / (10^((finalMatch$player2Momentum - finalMatch$player1Momentum) / 400) + 1)))
+```
+
+
+
