@@ -1,0 +1,368 @@
+---
+title: "Momentum Modeling"
+output: pdf_document
+geometry: margin = .5in
+---
+
+# Data Acquisition
+```{r, include=FALSE}
+setwd("~/MCM-2024/")
+wimbledon <- readRDS("Data/Wimbledon_2023_Round_Match_Set_Game.rds")
+library(tidyverse)
+```
+
+# Data Wrangling
+```{r}
+finalMatchSet1 <- dplyr::bind_rows(wimbledon$round7$match1$set1)
+finalMatchSet2 <- dplyr::bind_rows(wimbledon$round7$match1$set2)
+finalMatchSet3 <- dplyr::bind_rows(wimbledon$round7$match1$set3)
+finalMatchSet4 <- dplyr::bind_rows(wimbledon$round7$match1$set4)
+finalMatchSet5 <- dplyr::bind_rows(wimbledon$round7$match1$set5)
+```
+
+
+```{r}
+wimbledonData <- read.csv("Data/Wimbledon_featured_matches.csv")
+wimbledonMatches <- split(wimbledonData, wimbledonData$match_id)
+```
+
+```{r}
+eloRating <- function(player1Rating, player2Rating, kFactor, gameOutcome) {
+	# Expected win probability
+	player1WinProbability <- (1.0) / (1 + 10^((player2Rating - player1Rating) / 400))
+	player2WinProbability <- (1.0) / (1 + 10^((player1Rating - player2Rating) / 400))
+	
+	# Rating update
+	player1NewRating <- 0
+	player2NewRating <- 0
+	
+	if (gameOutcome == 1) # Player 1 wins
+	{
+		player1NewRating <- player1Rating + kFactor * (1 - player1WinProbability)
+		player2NewRating <- player2Rating + kFactor * (0 - player2WinProbability)
+	}
+	else if (gameOutcome == 2) # Player 2 wins
+	{
+		player1NewRating <- player1Rating + kFactor * (0 - player1WinProbability)
+		player2NewRating <- player2Rating + kFactor * (1 - player2WinProbability)
+	}
+	
+	newRatings <- list(player1NewRating, player2NewRating)
+	return(newRatings)
+}
+
+computeMomentumRating <- function(pointSet) {
+	playerMomentum <- matrix(0, nrow = nrow(pointSet), ncol = 2)
+	kFactor <- 16 # Elo rating movement strength
+	
+	for (point in 1:nrow(pointSet))
+	{
+		if (point == 1)
+		{
+			playerMomentum[point, 1:2] <- unlist(eloRating(400, 400, kFactor, pointSet$point_victor[point]))
+		}
+		else
+		{
+			playerMomentum[point, 1:2] <- unlist(eloRating(playerMomentum[point - 1, 1], playerMomentum[point - 1, 2], kFactor, pointSet$point_victor[point]))
+		}
+	}
+	
+	playerMomentum <- as.data.frame(playerMomentum)
+	names(playerMomentum) <- c("player1Momentum", "player2Momentum")
+	
+	pointSet <- cbind(pointSet, playerMomentum)
+	return(pointSet)
+}
+```
+
+```{r}
+for (match in 1:length(wimbledonMatches)) {
+	wimbledonMatches[[match]] <- computeMomentumRating(wimbledonMatches[[match]])
+}
+```
+
+```{r}
+temp <- wimbledonMatches[[1]]
+# ggplot(as.data.frame(lowess(1:nrow(temp), temp$momentumDelta, f = 0.1))) + 
+# 	geom_point(aes(1:nrow(temp), temp$player1Momentum)) + 
+# 	geom_point(aes(1:nrow(temp), temp$player2Momentum)) + 
+# 	geom_point(aes(1:nrow(temp), temp$x))
+# 
+
+ggplot(temp) +
+	# geom_line(aes(1:nrow(temp), momentumDelta)) +
+	# geom_smooth(aes(1:nrow(temp), momentumDelta), span = 0.3)
+	geom_line(aes(1:nrow(temp), player1Momentum)) +
+  geom_smooth(aes(1:nrow(temp), player1Momentum), span = .08)
+	# geom_smooth(aes(1:nrow(temp), player1Momentum, color = "Carlos Alcaraz"), span = 0.2) +
+	# geom_smooth(aes(1:nrow(temp), player2Momentum, color = "Nicolas Jarry"), span = 0.2)
+```
+
+
+```{r}
+momentum_delta <- lowess(temp$player1Momentum, f = .08)$y |> diff()
+has_momentum <- function(x, span, threshold) {
+  momentum_delta <- lowess(x$player1Momentum, f = span)$y |> diff()
+  c("none",case_when(
+    momentum_delta >= threshold ~ "p1",
+    momentum_delta <= -threshold ~ "p2",
+    .default = "none"
+    
+  )) |> factor()
+}
+
+pv <- wimbledonData$point_victor - 1
+sv <- wimbledonData$server - 1
+score <- 2*(pv-.5)
+next5 <- numeric(length(pv))
+for (i in 1:length(pv)) {
+  ind <- (i + 1):(min(i+5, length(pv)))
+  next5[i] <- sum(score[ind])
+}
+t <- 1:(length(pv)-5)
+trn_momentum <- function(w) {
+  momentum_indicator <- lapply(wimbledonMatches, has_momentum,
+                               span = w[1], threshold = w[2]) |> unlist(use.names = F)
+  if (length(levels(momentum_indicator)) == 1) {
+    1e6
+  } else {
+      mod <- lm(next5[t] ~ momentum_indicator[t] + sv[t])
+      AIC(mod)
+  }
+
+}
+```
+
+```{r}
+w1 <- c(.3,.3)
+best <- optim(w1, trn_momentum, method = "L-BFGS-B", lower=.2,
+              control = list(trace = 1))
+wimbledonData$momentum_indicator <- lapply(wimbledonMatches, has_momentum,
+                               span = best$par[1], threshold = best$par[2]) |> unlist(use.names = F)
+t2 <- 2:nrow(wimbledonData)
+pred_momentum <- nnet::multinom(momentum_indicator[t2] ~ p1_winner[t2-1] + p2_winner[t2-1] + 
+                                  p1_ace[t2-1] + p2_ace[t2-1] + 
+                                  p1_unf_err[t2-1] + p2_unf_err[t2-1] +
+                                  p1_double_fault[t2-1] + p2_double_fault[t2-1], data = wimbledonData)
+summary(pred_momentum)
+```
+Just using point victor to train the thresholds ends up just setting everything lowest, so I'm training on predicting the point difference of the next 5 points. lmk if you think of anything better.
+
+
+
+### Modified Elo Rating
+```{r}
+wimbledonData <- read.csv("Data/Wimbledon_featured_matches.csv")
+wimbledonMatches <- split(wimbledonData, wimbledonData$match_id)
+
+computeMomentumRating2 <- function(pointSet, kFactor) {
+	playerMomentum <- matrix(0, nrow = nrow(pointSet), ncol = 2)
+	
+	for (point in 1:nrow(pointSet))
+	{
+		if (point == 1)
+		{
+			playerMomentum[point, 1:2] <- unlist(eloRating(400, 400, kFactor, pointSet$point_victor[point]))
+		}
+		else
+		{
+			playerMomentum[point, 1:2] <- unlist(eloRating(playerMomentum[point - 1, 1], playerMomentum[point - 1, 2], kFactor, pointSet$point_victor[point]))
+		}
+	}
+	
+	playerMomentum <- as.data.frame(playerMomentum)
+	names(playerMomentum) <- c("player1Momentum", "player2Momentum")
+	
+	pointSet <- cbind(pointSet, playerMomentum)
+	return(pointSet)
+}
+
+has_momentum2 <- function(x, span, threshold, kFactor) {
+  #calculate modified elo
+  new_x <- computeMomentumRating2(x, kFactor)
+  
+  # create indicator
+  momentum_delta <- lowess(new_x$player1Momentum, f = span)$y |> diff()
+  c("none",case_when(
+    momentum_delta >= threshold ~ "p1",
+    momentum_delta <= -threshold ~ "p2",
+    .default = "none"
+    
+  )) |> factor()
+}
+trn2 <- function(w) {
+  if (w[1] <= 0 || w[2] <= 0) {
+    return(1e8)
+  }
+  
+  #create indicator for all data
+  momentum_indicator <- lapply(
+    wimbledonMatches, has_momentum2,
+    span = w[1], threshold = w[2], kFactor = w[3]) |> unlist(use.names = F)
+  
+  #test against point difference of the next 5 points
+  if (length(levels(momentum_indicator)) == 1) {
+    return(1e8)
+  } 
+  
+  t <- 1:(length(next5)-5)
+  mod <- lm(next5[t] ~ momentum_indicator[t] + sv[t])
+  AIC(mod)
+}
+
+w2 <- c(.01,.9,16)
+
+#best2 <- optim(w2, trn2,control = list(trace = 2))
+```
+
+### Optimizing with a random walk
+
+```{r}
+set.seed(1234)
+niter <- 2000
+scores <- numeric(niter)
+pars <- matrix(ncol = 3, nrow = niter)
+step_size <- .2
+curr <- w2
+cand <- curr
+for (i in 1:niter) {
+  #take random step
+  var_to_change <- (i %% 3) + 1
+
+  cand <- curr
+  cand[var_to_change] <- cand[var_to_change] + rnorm(1, sd = step_size)
+  
+  #acceptance probability
+  u <- runif(1)
+  
+  cand_score <- trn2(cand)
+  curr_score <- trn2(curr)
+  if (cand_score <= curr_score) {
+    curr <- cand
+    scores[i] <- cand_score
+    pars[i,] <- cand
+  } else {
+    scores[i] <- curr_score
+    pars[i,] <- curr
+  }
+  if (i %% 50 == 0) {
+    cat(paste0("Iteration = ",i,". Score = ",round(scores[i], 3), "\n"))
+  }
+}
+
+```
+
+```{r}
+delta_calc <- function(x, span, kFactor) {
+  #calculate modified elo
+  new_x <- computeMomentumRating2(x, kFactor)
+  
+  # create indicator
+  momentum_delta <- lowess(new_x$player1Momentum, f = span)$y |> diff()
+  c(0, momentum_delta)
+}
+wimbledonData$mom_del <- lapply(wimbledonMatches, delta_calc,
+                   span = curr[1], kFactor = curr[3]) |> unlist(use.names = F)
+wimbledonData$states <- lapply(wimbledonMatches, has_momentum2,
+                   span = curr[1], threshold = curr[2], kFactor = curr[3]) |> unlist(use.names = F)
+
+#wimbledonData %>% ggplot(aes(point_no, mom_del)) + geom_line() + facet_wrap(facets = vars(match_id))
+
+new_matches <- split(wimbledonData, wimbledonData$match_id)
+match1 <- new_matches[[1]]
+wimbledonData %>% group_by(set_no,states) %>% summarise(avg_winner = mean(point_victor)) %>%
+  ggplot(aes(set_no,avg_winner, col = states)) + geom_line() + ggtitle("Average Point Victor across sets by Momentum State")
+```
+
+### Not using an indicator
+
+```{r}
+trn3 <- function(w) {
+  if (w[1] <= 0 || w[2] <= 0) {
+    return(1e8)
+  }
+  
+  #create indicator for all data
+  momentum <- lapply(
+    wimbledonMatches, delta_calc,
+    span = w[1], kFactor = w[2]) |> unlist(use.names = F)
+  
+  
+  t <- 1:(length(next5)-5)
+  mod <- lm(next5[t] ~ momentum[t] + sv[t])
+  AIC(mod)
+}
+
+
+```
+
+```{r}
+set.seed(1234)
+niter <- 2000
+scores <- numeric(niter)
+pars <- matrix(ncol = 2, nrow = niter)
+step_size <- .2
+curr <- c(.1,16)
+cand <- curr
+for (i in 1:niter) {
+  #take random step
+  var_to_change <- (i %% 2) + 1
+
+  cand <- curr
+  cand[var_to_change] <- cand[var_to_change] + rnorm(1, sd = step_size)
+  
+  #acceptance probability
+  u <- runif(1)
+  
+  cand_score <- trn3(cand)
+  curr_score <- trn3(curr)
+  if (cand_score <= curr_score) {
+    curr <- cand
+    scores[i] <- cand_score
+    pars[i,] <- cand
+  } else {
+    scores[i] <- curr_score
+    pars[i,] <- curr
+  }
+  if (i %% 50 == 0) {
+    cat(paste0("Iteration = ",i,". Score = ",round(scores[i], 3), "\n"))
+  }
+}
+```
+
+```{r}
+wimbledonData$mom_del <- lapply(wimbledonMatches, delta_calc,
+                   span = curr[1], kFactor = curr[3]) |> unlist(use.names = F)
+
+wimbledonData <- read.csv("Data/Wimbledon_featured_matches.csv")
+wimbledonMatches <- split(wimbledonData, wimbledonData$match_id)
+
+wimbledonData$mom_del <- lapply(wimbledonMatches, delta_calc,
+                   span = curr[1], kFactor = curr[2]) |> unlist(use.names = F)
+wimbledonData$next5 <- next5
+
+new_matches <- split(wimbledonData, wimbledonData$match_id)
+match1 <- new_matches[[1]]
+wimbledonData %>% ggplot(aes(point_victor,mom_del)) + geom_jitter()
+
+finalMatch <- new_matches[[length(new_matches)]]
+finalMatch <- computeMomentumRating2(finalMatch, curr[2])
+ggplot(finalMatch, aes(point_no, mom_del, col = factor(next5))) + geom_point() + 
+	labs(title = "Momentum Difference", 
+		 subtitle = "2023 Wimbledon Championship - Men's Singles - Final Match",
+		 x = "Point Number",
+		 y = "Momentum Diffence (Current Point - Last Point)",
+		 color = "Pt Diff. of next 5 pts.")  + scale_color_discrete()
+ggsave("Figures/Final_Match_Momentum_Difference.png", dpi = 300)
+```
+
+```{r}
+null_mod <- lm(mom_del ~ 1, data = wimbledonData)
+full_mod <- lm(mom_del)
+best_mod <- step()
+
+```
+
+#### Algorithm
+
+
