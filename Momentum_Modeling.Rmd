@@ -226,8 +226,8 @@ step_size <- .2
 curr <- w2
 cand <- curr
 for (i in 1:niter) {
-  #take random step
-  var_to_change <- (i %% 3) + 1
+
+  var_to_change <- (i %% 3) + 1   #take random step
 
   cand <- curr
   cand[var_to_change] <- cand[var_to_change] + rnorm(1, sd = step_size)
@@ -347,20 +347,63 @@ wimbledonData %>% ggplot(aes(point_victor,mom_del)) + geom_jitter()
 
 finalMatch <- new_matches[[length(new_matches)]]
 finalMatch <- computeMomentumRating2(finalMatch, curr[2])
-ggplot(finalMatch, aes(point_no, mom_del, col = factor(next5))) + geom_point() + 
+par(mfrow = c(1,2))
+ggplot(finalMatch, aes(point_no, player1Momentum)) + geom_line() + geom_smooth(span = .099, se = F) +
+  labs(title = "Using a LOWESS Curve (blue) to Smooth Minor Variations.",
+       subtitle = "2023 Wimbledon Championship - Men's Singles - Final Match",
+       x= "Point Number",
+       y = "Elo of Carlos Alcaraz") +
+  annotate(geom = "text", x = 19, y = 410, label = "Set 1") +
+	geom_vline(xintercept = which(finalMatch$set_no == 2)[1], linetype = 3) +
+	annotate(geom = "text",x = 97, y = 410, label = "Set 2") +
+	geom_vline(xintercept = which(finalMatch$set_no == 3)[1], linetype = 3) +
+	annotate(geom = "text",x = 175, y = 410, label = "Set 3") + 
+	geom_vline(xintercept = which(finalMatch$set_no == 4)[1], linetype = 3) +
+	annotate(geom = "text",x = 245, y = 410, label = "Set 4") +
+	geom_vline(xintercept = which(finalMatch$set_no == 5)[1], linetype = 3) +
+	annotate(geom = "text",x = 310, y = 410, label = "Set 5")
+ggsave("Figures/Final_Smoothed_Diff.png", dpi = 300)
+ggplot(finalMatch, aes(point_no, mom_del, col = factor(next5))) + geom_point() + geom_hline(yintercept = 0, linetype = 2) + 
+  annotate(geom = "text", x = 19, y = .3, label = "Set 1") +
+	geom_vline(xintercept = which(finalMatch$set_no == 2)[1], linetype = 3) +
+	annotate(geom = "text",x = 97, y = .3, label = "Set 2") +
+	geom_vline(xintercept = which(finalMatch$set_no == 3)[1], linetype = 3) +
+	annotate(geom = "text",x = 175, y = .3, label = "Set 3") + 
+	geom_vline(xintercept = which(finalMatch$set_no == 4)[1], linetype = 3) +
+	annotate(geom = "text",x = 245, y = .3, label = "Set 4") +
+	geom_vline(xintercept = which(finalMatch$set_no == 5)[1], linetype = 3) +
+	annotate(geom = "text",x = 310, y = .3, label = "Set 5") +
 	labs(title = "Momentum Difference", 
 		 subtitle = "2023 Wimbledon Championship - Men's Singles - Final Match",
 		 x = "Point Number",
-		 y = "Momentum Diffence (Current Point - Last Point)",
-		 color = "Pt Diff. of next 5 pts.")  + scale_color_discrete()
+		 y = "Smooth Elo Difference (Current - Last)",
+		 color = "Pt. Diff. of next 5 pts.")  + scale_color_discrete()
 ggsave("Figures/Final_Match_Momentum_Difference.png", dpi = 300)
 ```
 
 ```{r}
-null_mod <- lm(mom_del ~ 1, data = wimbledonData)
-full_mod <- lm(mom_del)
-best_mod <- step()
+clean_wimbledon <- wimbledonData %>% na.omit()
+clean_wimbledon$p1_score <- factor(clean_wimbledon$p1_score)
+clean_wimbledon$p2_score <- factor(clean_wimbledon$p2_score)
 
+to_scale <- c("p1_distance_run", "p2_distance_run", "rally_count", "speed_mph")
+range01 <- function(x){(x-min(x))/(max(x)-min(x))}
+
+to_scale_vars <- clean_wimbledon[,to_scale]
+scaled_vars <- apply(to_scale_vars, 2, range01)
+clean_wimbledon[,to_scale] <- scaled_vars
+null_mod <- lm(mom_del ~ 1, data = clean_wimbledon)
+full_mod <- lm(mom_del ~ . - next5 - match_id - elapsed_time
+               - player1 - player2 - point_victor
+               - p1_score - p2_score, data = clean_wimbledon)
+
+best_mod <- step(full_mod, scope = list(upper =full_mod, lower = null_mod), direction = "both")
+summary(best_mod)
+coef(best_mod) |> abs() |> sort(decreasing = T)
+
+clean_wimbledon$h <- ifelse(clean_wimbledon$mom_del >= 0, "Positive", "Negative")
+
+clean_wimbledon %>% group_by(h) %>% summarize(avg_win = mean(point_victor)) %>% ggplot(aes(h, avg_win)) + geom_col() + labs(title = "Average Winner based on Momentum", subtitle = "where a lower momentum is good for player")
 ```
 
 #### Algorithm
