@@ -1,0 +1,258 @@
+---
+title: "Momentum Modeling"
+output: pdf_document
+---
+
+# Data Acquisition
+
+
+
+
+
+
+
+```{r}
+wimbledon <- readRDS("Wimbledon_2023_Round_Match_Set_Game.rds")
+```
+
+# Data Wrangling
+```{r}
+finalMatchSet1 <- dplyr::bind_rows(wimbledon$round7$match1$set1)
+finalMatchSet2 <- dplyr::bind_rows(wimbledon$round7$match1$set2)
+finalMatchSet3 <- dplyr::bind_rows(wimbledon$round7$match1$set3)
+finalMatchSet4 <- dplyr::bind_rows(wimbledon$round7$match1$set4)
+finalMatchSet5 <- dplyr::bind_rows(wimbledon$round7$match1$set5)
+```
+
+
+```{r}
+wimbledonData <- read.csv("Wimbledon_featured_matches.csv")
+wimbledonMatches <- split(wimbledonData, wimbledonData$match_id)
+```
+
+```{r}
+eloRating <- function(player1Rating, player2Rating, kFactor, gameOutcome)
+{
+	# Expected win probability
+	player1WinProbability <- (1.0) / (1 + 10^((player2Rating - player1Rating) / 400))
+	player2WinProbability <- (1.0) / (1 + 10^((player1Rating - player2Rating) / 400))
+	
+	# Rating update
+	player1NewRating <- 0
+	player2NewRating <- 0
+	
+	if (gameOutcome == 1) # Player 1 wins
+	{
+		player1NewRating <- player1Rating + kFactor * (1 - player1WinProbability)
+		player2NewRating <- player2Rating + kFactor * (0 - player2WinProbability)
+	}
+	else if (gameOutcome == 2) # Player 2 wins
+	{
+		player1NewRating <- player1Rating + kFactor * (0 - player1WinProbability)
+		player2NewRating <- player2Rating + kFactor * (1 - player2WinProbability)
+	}
+	
+	newRatings <- list(player1NewRating, player2NewRating)
+	return(newRatings)
+}
+
+computeMomentumRating <- function(pointSet)
+{
+	playerMomentum <- matrix(0, nrow = nrow(pointSet), ncol = 3)
+	kFactor <- 16 # Elo rating movement strength
+	
+	for (point in 1:nrow(pointSet))
+	{
+		if (point == 1)
+		{
+			playerMomentum[point, 1:2] <- unlist(eloRating(400, 400, kFactor, pointSet$point_victor[point]))
+		}
+		else
+		{
+			playerMomentum[point, 1:2] <- unlist(eloRating(playerMomentum[point - 1, 1], playerMomentum[point - 1, 2], kFactor, pointSet$point_victor[point]))
+		}
+	}
+	
+	playerMomentum[, 3] <- playerMomentum[, 1] - playerMomentum[, 2]
+	playerMomentum <- as.data.frame(playerMomentum)
+	names(playerMomentum) <- c("player1Momentum", "player2Momentum", "momentumDelta")
+	
+	pointSet <- cbind(pointSet, playerMomentum)
+	return(pointSet)
+}
+```
+
+```{r}
+for (match in 1:length(wimbledonMatches))
+{
+	wimbledonMatches[[match]] <- computeMomentumRating(wimbledonMatches[[match]])
+}
+```
+
+
+```{r}
+momentumSwitchClassifier <- function(lowessSpan)
+{
+	
+}
+
+```
+
+
+
+
+
+
+
+
+```{r}
+temp <- wimbledonMatches[[1]]
+# ggplot(as.data.frame(lowess(1:nrow(temp), temp$momentumDelta, f = 0.1))) + 
+# 	geom_point(aes(1:nrow(temp), temp$player1Momentum)) + 
+# 	geom_point(aes(1:nrow(temp), temp$player2Momentum)) + 
+# 	geom_point(aes(1:nrow(temp), temp$x))
+# 
+
+ggplot(temp) +
+	geom_line(aes(1:nrow(temp), momentumDelta)) +
+	geom_smooth(aes(1:nrow(temp), momentumDelta), span = 0.3)
+	# geom_line(aes(1:nrow(temp), player1Momentum, color = "Carlos Alcaraz")) +
+	# geom_line(aes(1:nrow(temp), player2Momentum, color = "Nicolas Jarry"))
+	# geom_smooth(aes(1:nrow(temp), player1Momentum, color = "Carlos Alcaraz"), span = 0.2) +
+	# geom_smooth(aes(1:nrow(temp), player2Momentum, color = "Nicolas Jarry"), span = 0.2)
+```
+
+```{r}
+plot(1:300, round(lowess(1:300, temp$momentumDelta, f = 0.2)$y, digits = 0.1))
+```
+
+#### Results
+
+
+
+```{r}
+
+
+# set1Momentum <- computeMomentumRating(set1Momentum, finalMatchSet1)
+# set2Momentum <- computeMomentumRating(set2Momentum, finalMatchSet2)
+# set3Momentum <- computeMomentumRating(set3Momentum, finalMatchSet3)
+# set4Momentum <- computeMomentumRating(set4Momentum, finalMatchSet4)
+# set5Momentum <- computeMomentumRating(set5Momentum, finalMatchSet5)
+```
+
+```{r}
+ggplot(as.data.frame(set1Momentum)) + 
+	geom_point(aes(1:nrow(set1Momentum), V1, color = "Carlos Alcaraz")) + 
+	geom_point(aes(1:nrow(set1Momentum), V2, color = "Novak Djokovic")) + 
+	labs(title = "Momentum Rating by Player",
+		 subtitle = "Final Game, Set 1",
+		 x = "Point Number",
+		 y = "Momentum Rating",
+		 caption = "Momentum Rating is equivalent to an Unmodified Elo Rating",
+		 color = "Player")
+
+ggplot(as.data.frame(set2Momentum)) + 
+	geom_point(aes(1:nrow(set2Momentum), V1, color = "Carlos Alcaraz")) + 
+	geom_point(aes(1:nrow(set2Momentum), V2, color = "Novak Djokovic")) + 
+	labs(title = "Momentum Rating by Player",
+		 subtitle = "Final Game, Set 2",
+		 x = "Point Number",
+		 y = "Momentum Rating",
+		 caption = "Momentum Rating is equivalent to an Unmodified Elo Rating",
+		 color = "Player")
+
+ggplot(as.data.frame(set3Momentum)) + 
+	geom_point(aes(1:nrow(set3Momentum), V1, color = "Carlos Alcaraz")) + 
+	geom_point(aes(1:nrow(set3Momentum), V2, color = "Novak Djokovic")) + 
+	labs(title = "Momentum Rating by Player",
+		 subtitle = "Final Game, Set 3",
+		 x = "Point Number",
+		 y = "Momentum Rating",
+		 caption = "Momentum Rating is equivalent to an Unmodified Elo Rating",
+		 color = "Player")
+
+ggplot(as.data.frame(set4Momentum)) + 
+	geom_point(aes(1:nrow(set4Momentum), V1, color = "Carlos Alcaraz")) + 
+	geom_point(aes(1:nrow(set4Momentum), V2, color = "Novak Djokovic")) + 
+	labs(title = "Momentum Rating by Player",
+		 subtitle = "Final Game, Set 4",
+		 x = "Point Number",
+		 y = "Momentum Rating",
+		 caption = "Momentum Rating is equivalent to an Unmodified Elo Rating",
+		 color = "Player")
+
+ggplot(as.data.frame(set5Momentum)) + 
+	geom_point(aes(1:nrow(set5Momentum), V1, color = "Carlos Alcaraz")) + 
+	geom_point(aes(1:nrow(set5Momentum), V2, color = "Novak Djokovic")) + 
+	labs(title = "Momentum Rating by Player",
+		 subtitle = "Final Game, Set 5",
+		 x = "Point Number",
+		 y = "Momentum Rating",
+		 caption = "Momentum Rating is equivalent to an Unmodified Elo Rating",
+		 color = "Player")
+```
+
+
+
+```{r}
+acf(finalMatchMomentum[, 1] - finalMatchMomentum[, 2])
+```
+
+
+
+```{r}
+finalMatch <- dplyr::bind_rows(finalMatchSet1, finalMatchSet2, finalMatchSet3, 
+							   finalMatchSet4, finalMatchSet5)
+finalMatchMomentum <- matrix(0, nrow = nrow(finalMatch), ncol = 2)
+finalMatchMomentum <- computeMomentumRating(finalMatchMomentum, finalMatch)
+```
+
+```{r}
+ggplot(as.data.frame(finalMatchMomentum)) + 
+	geom_point(aes(1:334, V1, color = "Carlos Alcaraz")) + 
+	geom_point(aes(1:334, V2, color = "Novak Djokovic")) + 
+	geom_vline(xintercept = 46) + 
+	geom_vline(xintercept = 45 + 94 + 1) + 
+	geom_vline(xintercept = 45 + 94 + 70 + 1) + 
+	geom_vline(xintercept = 45 + 94 + 70 + 64 + 1) + 
+	labs(title = "Momentum Rating by Player",
+		 subtitle = "Wimbledon 2023 Final Match", 
+		 x = "Point Number", 
+		 y = "Momentum Rating",
+		 color = "Player", 
+		 caption = "Momentum Rating is Equivalent to Unmodified Elo Rating")
+
+```
+
+```{r}
+model <- glm()
+mswmModel <- msmFit(object)
+```
+
+
+```{r}
+mswmData <- dplyr::bind_cols(finalMatch, as.data.frame(finalMatchMomentum[, 1] - finalMatchMomentum[, 2]))
+names(mswmData) <- c(names(finalMatch), "momentumShift")
+
+
+model <- lm(momentumDelta ~ 0, data = temp)
+
+autocorrelationTerms <- 10
+switchingTerms <- rep(TRUE, autocorrelationTerms + 1)
+mswmModel <- msmFit(object = model, k = 2, sw = switchingTerms, p = autocorrelationTerms, control = list(parallel = FALSE))
+MSwM::summary(mswmModel)
+```
+
+
+```{r}
+temp2 <- lowess(temp$momentumDelta, f = 0.2)$y |> diff()
+ggplot(temp) + 
+	geom_point(aes(1:300, momentumDelta)) + 
+	geom_point()
+```
+
+### Modified Elo Rating
+
+#### Algorithm
+
+

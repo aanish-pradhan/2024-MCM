@@ -1,0 +1,101 @@
+---
+title: "R Notebook"
+output: pdf_document
+---
+
+```{r}
+# Import Packages
+library(dplyr) # Data frame manipulation
+library(readr) # Delimited file reading
+library(tibble) # Data frames
+```
+
+```{r}
+# Data Ingestion
+wimbledonData <- read_csv("Wimbledon_featured_matches.csv")
+```
+
+# Data Structuring
+
+We will sort and structure the data as nested lists containing tibble data 
+frames following the round-match-set-game hierarchy.
+
+```{r}
+# Extract individual rounds
+round3 <- wimbledonData[grepl("^2023-wimbledon-13", wimbledonData$match_id), ]
+round4 <- wimbledonData[grepl("^2023-wimbledon-14", wimbledonData$match_id), ]
+round5 <- wimbledonData[grepl("^2023-wimbledon-15", wimbledonData$match_id), ]
+round6 <- wimbledonData[grepl("^2023-wimbledon-16", wimbledonData$match_id), ]
+round7 <- wimbledonData[grepl("^2023-wimbledon-17", wimbledonData$match_id), ]
+```
+
+```{r}
+# Group each round by match, set and game
+filterMatchSetGame <- function(roundData)
+{
+	# Extract matches from each round
+	roundMatches <- list()
+	matchIDs <- names(table(roundData$match_id))
+	for (match in 1:length(matchIDs))
+	{
+		currentMatch <- dplyr::filter(roundData, roundData$match_id == matchIDs[match])
+		
+		# Extract sets from each match
+		sets <- list()
+		setIDs <- unique(currentMatch$set_no)
+		for (set in 1:length(setIDs))
+		{
+			currentSet <- dplyr::filter(currentMatch, currentMatch$set_no == setIDs[set])
+			
+			# Extract games from each set
+			games <- list()
+			gameIDs <- unique(currentSet$game_no)
+			for (game in 1:length(gameIDs))
+			{
+				currentGame <- dplyr::filter(currentSet, currentSet$game_no == gameIDs[game])
+				
+				games[[game]] <- currentGame
+			}
+			names(games) <- stringr::str_c("game", as.character(1:length(gameIDs)))
+			
+			sets[[set]] <- games
+		}
+		names(sets) <- stringr::str_c("set", as.character(1:length(setIDs)))
+		
+		roundMatches[[match]] <- sets
+	}
+	names(roundMatches) <- stringr::str_c("match", as.character(1:length(matchIDs)))
+	
+	return(roundMatches)
+}
+```
+
+```{r}
+# Group each round
+round3 <- filterMatchSetGame(round3)
+round4 <- filterMatchSetGame(round4)
+round5 <- filterMatchSetGame(round5)
+round6 <- filterMatchSetGame(round6)
+round7 <- filterMatchSetGame(round7)
+
+wimbledon <- list(round3, round4, round5, round6, round7)
+names(wimbledon) <- stringr::str_c("round", as.character(3:7))
+saveRDS(wimbledon, "Wimbledon_2023_Round_Match_Set_Game.rds")
+
+rm(round3, round4, round5, round6, round7)
+```
+
+
+```{r}
+glm()
+
+
+```
+
+
+
+
+
+
+
+
